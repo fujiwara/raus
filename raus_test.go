@@ -1,6 +1,7 @@
 package raus_test
 
 import (
+	"log"
 	"os"
 	"sync"
 	"testing"
@@ -102,6 +103,37 @@ func TestNew(t *testing.T) {
 			t.Errorf("[min max]=%v must return error", s)
 		}
 	}
+}
+
+func ExampleNew() {
+	// prepere context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	r, _ := raus.New("redis://localhost:26379", 0, 3)
+	id, ch, _ := r.Get(ctx)
+	log.Println("Got id %d", id)
+
+	// watch error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err, more := <-ch
+		if !more {
+			// raus shutdown successfully
+			return
+		} else {
+			// fatal error
+			panic(err)
+		}
+	}()
+
+	// Run your application code
+
+	// notify shutdown
+	cancel()
+
+	wg.Wait()
 }
 
 func TestGet(t *testing.T) {
