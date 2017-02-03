@@ -112,6 +112,7 @@ func (r *Raus) size() int {
 
 func (r *Raus) raiseError(err error) {
 	r.channel <- err
+	close(r.channel)
 }
 
 // Get gets unique id ranged between min and max.
@@ -119,7 +120,7 @@ func (r *Raus) Get(ctx context.Context) (int, chan error, error) {
 	go r.subscribe(ctx)
 	err := <-r.channel
 	if err != nil {
-		return ErrorID, nil, err
+		return ErrorID, r.channel, err
 	}
 	go r.publish(ctx)
 	return r.id, r.channel, nil
@@ -221,26 +222,35 @@ LOCKING:
 		}
 	}
 
-	pubsub, err = c.Subscribe(r.pubSubChannel)
-	if err != nil {
-		r.raiseError(err)
-	}
-WATCHING:
 	for {
-		msg, err := pubsub.ReceiveMessage()
+		pubsub, err := c.Subscribe(r.pubSubChannel)
+		defer pubsub.Unsubscribe()
 		if err != nil {
 			log.Println(err)
-			continue WATCHING
+			time.Sleep(time.Second)
+			continue
 		}
-		xuuid, xid, err := parsePayload(msg.Payload)
-		if err != nil {
-			log.Println(err)
-			continue WATCHING
-		}
-		if xid == r.id && xuuid != r.uuid {
-			log.Printf("duplicate id %d from %s", xid, xuuid)
-			r.raiseError(errors.New("duplicate id detected"))
-			return
+	WATCHING:
+		for {
+			if ctx.Err() != nil {
+				log.Println("cancel watching")
+				return
+			}
+			msg, err := pubsub.ReceiveMessage()
+			if err != nil {
+				log.Println(err)
+				continue WATCHING
+			}
+			xuuid, xid, err := parsePayload(msg.Payload)
+			if err != nil {
+				log.Println(err)
+				continue WATCHING
+			}
+			if xid == r.id && xuuid != r.uuid {
+				log.Printf("duplicate id %d from %s", xid, xuuid)
+				r.raiseError(errors.New("duplicate id detected"))
+				return
+			}
 		}
 	}
 }
@@ -279,6 +289,7 @@ TICKER:
 			} else {
 				log.Printf("remove a lock key %s successfully", r.lockKey())
 			}
+			close(r.channel)
 			return
 		default:
 			err := c.Publish(r.pubSubChannel, payload).Err()
