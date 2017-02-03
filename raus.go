@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +24,7 @@ type Raus struct {
 	id            int
 	min           int
 	max           int
-	redisAddr     string
+	redisOptions  *redis.Options
 	namespace     string
 	pubSubChannel string
 	channel       chan error
@@ -30,13 +32,14 @@ type Raus struct {
 
 const (
 	ErrorID             = -1
-	maxCandidate        = 10
-	defaultNamespace    = "raus"
+	DefaultNamespace    = "raus"
 	pubSubChannelSuffix = ":broadcast"
 )
 
+var MaxCandidate = 10
+
 // New creates *Raus object.
-func New(addr string, min, max int) (*Raus, error) {
+func New(redisURI string, min, max int) (*Raus, error) {
 	var s int64
 	if err := binary.Read(crand.Reader, binary.LittleEndian, &s); err != nil {
 		s = time.Now().UnixNano()
@@ -47,23 +50,60 @@ func New(addr string, min, max int) (*Raus, error) {
 	if min >= max {
 		return nil, errors.New("max should be greater than min")
 	}
+	op, ns, err := ParseRedisURI(redisURI)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Raus{
 		rand:          rand.New(rand.NewSource(s)),
 		uuid:          uuid.NewV4().String(),
 		min:           min,
 		max:           max,
-		redisAddr:     addr,
-		namespace:     defaultNamespace,
-		pubSubChannel: defaultNamespace + pubSubChannelSuffix,
+		redisOptions:  op,
+		namespace:     ns,
+		pubSubChannel: ns + pubSubChannelSuffix,
 		channel:       make(chan error, 0),
 	}, nil
 }
 
-// SetNamespace sets namespace (= redis key prefix)
-func (r *Raus) SetNamespace(n string) {
-	r.namespace = n
-	r.pubSubChannel = n + pubSubChannelSuffix
+// ParseRedisURI parses uri for redis (redis://host:port/db?ns=namespace)
+func ParseRedisURI(s string) (*redis.Options, string, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, "", err
+	}
+	if u.Scheme != "redis" {
+		return nil, "", errors.New("invalid scheme")
+	}
+	op := &redis.Options{}
+	h, p, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		h = u.Host
+		p = "6379"
+	}
+	op.Network = "tcp"
+	op.Addr = h + ":" + p
+	if u.Path == "" || u.Path == "/" {
+		op.DB = 0
+	} else {
+		ps := strings.Split(u.Path, "/")
+		if len(ps) > 1 {
+			i, err := strconv.Atoi(ps[1])
+			if err != nil {
+				return nil, "", fmt.Errorf("invalid database %s", ps[1])
+			}
+			op.DB = i
+		} else {
+			op.DB = 0
+		}
+	}
+	ns := u.Query()["ns"]
+	if len(ns) > 0 {
+		return op, ns[0], nil
+	} else {
+		return op, DefaultNamespace, nil
+	}
 }
 
 func (r *Raus) size() int {
@@ -89,9 +129,7 @@ func (r *Raus) subscribe(ctx context.Context) {
 	// table for looking up unused id
 	usedIds := make(map[int]bool, r.size())
 
-	c := redis.NewClient(&redis.Options{
-		Addr: r.redisAddr,
-	})
+	c := redis.NewClient(r.redisOptions)
 	defer c.Close()
 
 	// subscribe to channel, and reading other's id (3 sec)
@@ -143,13 +181,13 @@ LISTING:
 
 LOCKING:
 	for {
-		candidate := make([]int, 0, maxCandidate)
+		candidate := make([]int, 0, MaxCandidate)
 		for i := r.min; i <= r.max; i++ {
 			if usedIds[i] {
 				continue
 			}
 			candidate = append(candidate, i)
-			if len(candidate) >= maxCandidate {
+			if len(candidate) >= MaxCandidate {
 				break
 			}
 		}
@@ -224,9 +262,7 @@ func newPayload(uuid string, id int) string {
 }
 
 func (r *Raus) publish(ctx context.Context) {
-	c := redis.NewClient(&redis.Options{
-		Addr: r.redisAddr,
-	})
+	c := redis.NewClient(r.redisOptions)
 	defer c.Close()
 
 	ticker := time.NewTicker(1 * time.Second)
