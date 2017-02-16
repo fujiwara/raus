@@ -6,10 +6,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
+	stdlog "log"
 	"math/rand"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -36,7 +37,23 @@ const (
 	pubSubChannelSuffix = ":broadcast"
 )
 
-var MaxCandidate = 10
+var (
+	MaxCandidate = 10
+	log          Logger
+)
+
+type Logger interface {
+	Println(...interface{})
+	Printf(string, ...interface{})
+}
+
+func init() {
+	log = stdlog.New(os.Stderr, "", stdlog.LstdFlags) // default logger
+}
+
+func SetLogger(l Logger) {
+	log = l
+}
 
 // New creates *Raus object.
 func New(redisURI string, min, max int) (*Raus, error) {
