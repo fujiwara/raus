@@ -14,10 +14,9 @@ import (
 	"gopkg.in/redis.v5"
 )
 
-var invalidMinMaxSet = [][]int{
-	[]int{-1, 1},
-	[]int{0, 0},
-	[]int{2, 1},
+var invalidMinMaxSet = [][]uint{
+	[]uint{0, 0},
+	[]uint{2, 1},
 }
 
 type parseTest struct {

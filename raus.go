@@ -22,9 +22,9 @@ import (
 type Raus struct {
 	rand          *rand.Rand
 	uuid          string
-	id            int
-	min           int
-	max           int
+	id            uint
+	min           uint
+	max           uint
 	redisOptions  *redis.Options
 	namespace     string
 	pubSubChannel string
@@ -32,7 +32,6 @@ type Raus struct {
 }
 
 const (
-	ErrorID             = -1
 	DefaultNamespace    = "raus"
 	pubSubChannelSuffix = ":broadcast"
 )
@@ -56,13 +55,10 @@ func SetLogger(l Logger) {
 }
 
 // New creates *Raus object.
-func New(redisURI string, min, max int) (*Raus, error) {
+func New(redisURI string, min, max uint) (*Raus, error) {
 	var s int64
 	if err := binary.Read(crand.Reader, binary.LittleEndian, &s); err != nil {
 		s = time.Now().UnixNano()
-	}
-	if min < 0 {
-		return nil, errors.New("min should be greater than or equal to 0")
 	}
 	if min >= max {
 		return nil, errors.New("max should be greater than min")
@@ -123,7 +119,7 @@ func ParseRedisURI(s string) (*redis.Options, string, error) {
 	}
 }
 
-func (r *Raus) size() int {
+func (r *Raus) size() uint {
 	return r.max - r.min
 }
 
@@ -133,11 +129,11 @@ func (r *Raus) raiseError(err error) {
 }
 
 // Get gets unique id ranged between min and max.
-func (r *Raus) Get(ctx context.Context) (int, chan error, error) {
+func (r *Raus) Get(ctx context.Context) (uint, chan error, error) {
 	go r.subscribe(ctx)
 	err := <-r.channel
 	if err != nil {
-		return ErrorID, r.channel, err
+		return 0, r.channel, err
 	}
 	go r.publish(ctx)
 	return r.id, r.channel, nil
@@ -145,7 +141,7 @@ func (r *Raus) Get(ctx context.Context) (int, chan error, error) {
 
 func (r *Raus) subscribe(ctx context.Context) {
 	// table for looking up unused id
-	usedIds := make(map[int]bool, r.size())
+	usedIds := make(map[uint]bool, r.size())
 
 	c := redis.NewClient(r.redisOptions)
 	defer c.Close()
@@ -199,7 +195,7 @@ LISTING:
 
 LOCKING:
 	for {
-		candidate := make([]int, 0, MaxCandidate)
+		candidate := make([]uint, 0, MaxCandidate)
 		for i := r.min; i <= r.max; i++ {
 			if usedIds[i] {
 				continue
@@ -215,7 +211,7 @@ LOCKING:
 		}
 		log.Printf("candidate ids: %v", candidate)
 		// pick up randomly
-		id := candidate[r.rand.Intn(len(candidate))]
+		id := candidate[uint(r.rand.Intn(len(candidate)))]
 
 		// try to lock by SET NX
 		log.Println("trying to get lock key", r.candidateLockKey(id))
@@ -272,19 +268,19 @@ LOCKING:
 	}
 }
 
-func parsePayload(payload string) (string, int, error) {
+func parsePayload(payload string) (string, uint, error) {
 	s := strings.Split(payload, ":")
 	if len(s) != 2 {
 		return "", 0, fmt.Errorf("unexpected data %s", payload)
 	}
-	id, err := strconv.Atoi(s[1])
+	id, err := strconv.ParseUint(s[1], 10, 64)
 	if err != nil {
 		return "", 0, fmt.Errorf("unexpected data %s", payload)
 	}
-	return s[0], id, nil
+	return s[0], uint(id), nil
 }
 
-func newPayload(uuid string, id int) string {
+func newPayload(uuid string, id uint) string {
 	return fmt.Sprintf("%s:%d", uuid, id)
 }
 
@@ -328,6 +324,6 @@ func (r *Raus) lockKey() string {
 	return fmt.Sprintf("%s:id:%d", r.namespace, r.id)
 }
 
-func (r *Raus) candidateLockKey(id int) string {
+func (r *Raus) candidateLockKey(id uint) string {
 	return fmt.Sprintf("%s:id:%d", r.namespace, id)
 }
