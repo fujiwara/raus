@@ -4,7 +4,6 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	stdlog "log"
 	"math/rand"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/satori/go.uuid"
 	"gopkg.in/redis.v5"
 )
@@ -38,12 +38,30 @@ const (
 
 var (
 	MaxCandidate = 10
+	LockExpires  = 60 * time.Second
 	log          Logger
 )
 
 type Logger interface {
 	Println(...interface{})
 	Printf(string, ...interface{})
+}
+
+type fatal interface {
+	isFatal() bool
+}
+
+func isFatal(err error) bool {
+	fe, ok := err.(fatal)
+	return ok && fe.isFatal()
+}
+
+type fatalError struct {
+	error
+}
+
+func (e fatalError) isFatal() bool {
+	return true
 }
 
 func init() {
@@ -188,13 +206,22 @@ LISTING:
 	}
 
 	pubsub.Unsubscribe()
-	if ctx.Err() != nil {
-		r.raiseError(errors.New("canceled"))
+
+	select {
+	case <-ctx.Done():
+		r.raiseError(ctx.Err())
 		return
+	default:
 	}
 
 LOCKING:
 	for {
+		select {
+		case <-ctx.Done():
+			r.raiseError(ctx.Err())
+			return
+		default:
+		}
 		candidate := make([]uint, 0, MaxCandidate)
 		for i := r.min; i <= r.max; i++ {
 			if usedIds[i] {
@@ -218,7 +245,7 @@ LOCKING:
 		res := c.SetNX(
 			r.candidateLockKey(id), // key
 			r.uuid,                 // value
-			60*time.Second,         // expiration
+			LockExpires,            // expiration
 		)
 		if err := res.Err(); err != nil {
 			r.raiseError(err)
@@ -232,38 +259,6 @@ LOCKING:
 		} else {
 			log.Println("could not get lock for", id)
 			usedIds[id] = true
-		}
-	}
-
-	for {
-		pubsub, err := c.Subscribe(r.pubSubChannel)
-		defer pubsub.Unsubscribe()
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-	WATCHING:
-		for {
-			if ctx.Err() != nil {
-				log.Println("cancel watching")
-				return
-			}
-			msg, err := pubsub.ReceiveMessage()
-			if err != nil {
-				log.Println(err)
-				continue WATCHING
-			}
-			xuuid, xid, err := parsePayload(msg.Payload)
-			if err != nil {
-				log.Println(err)
-				continue WATCHING
-			}
-			if xid == r.id && xuuid != r.uuid {
-				log.Printf("duplicate id %d from %s", xid, xuuid)
-				r.raiseError(errors.New("duplicate id detected"))
-				return
-			}
 		}
 	}
 }
@@ -286,12 +281,12 @@ func newPayload(uuid string, id uint) string {
 
 func (r *Raus) publish(ctx context.Context) {
 	c := redis.NewClient(r.redisOptions)
-	defer c.Close()
+	defer func() {
+		c.Close()
+	}()
 
 	ticker := time.NewTicker(1 * time.Second)
-	payload := newPayload(r.uuid, r.id)
-TICKER:
-	for range ticker.C {
+	for {
 		select {
 		case <-ctx.Done():
 			log.Println("shutting down")
@@ -304,20 +299,38 @@ TICKER:
 			}
 			close(r.channel)
 			return
-		default:
-			err := c.Publish(r.pubSubChannel, payload).Err()
+		case <-ticker.C:
+			err := r.holdLock(c)
 			if err != nil {
 				log.Println(err)
-				continue TICKER
-			}
-			// update expiration
-			err = c.Set(r.lockKey(), r.uuid, 60*time.Second).Err()
-			if err != nil {
-				log.Println(err)
-				continue TICKER
+				if isFatal(err) {
+					r.raiseError(err)
+					return
+				}
+				c.Close()
+				c = redis.NewClient(r.redisOptions)
 			}
 		}
 	}
+}
+
+func (r *Raus) holdLock(c *redis.Client) error {
+	if err := c.Publish(r.pubSubChannel, newPayload(r.uuid, r.id)).Err(); err != nil {
+		return errors.Wrap(err, "PUBLISH failed")
+	}
+
+	res, err := c.GetSet(r.lockKey(), r.uuid).Result()
+	if err != nil {
+		return errors.Wrap(err, "GETSET failed")
+	}
+	if res != r.uuid {
+		return fatalError{fmt.Errorf("unexpected uuid got: %s", res)}
+	}
+
+	if err := c.Expire(r.lockKey(), LockExpires).Err(); err != nil {
+		return errors.Wrap(err, "EXPIRE failed")
+	}
+	return nil
 }
 
 func (r *Raus) lockKey() string {
