@@ -141,23 +141,16 @@ func (r *Raus) size() uint {
 	return r.max - r.min
 }
 
-func (r *Raus) raiseError(err error) {
-	r.channel <- err
-	close(r.channel)
-}
-
 // Get gets unique id ranged between min and max.
 func (r *Raus) Get(ctx context.Context) (uint, chan error, error) {
-	go r.subscribe(ctx)
-	err := <-r.channel
-	if err != nil {
+	if err := r.subscribe(ctx); err != nil {
 		return 0, r.channel, err
 	}
 	go r.publish(ctx)
 	return r.id, r.channel, nil
 }
 
-func (r *Raus) subscribe(ctx context.Context) {
+func (r *Raus) subscribe(ctx context.Context) error {
 	// table for looking up unused id
 	usedIds := make(map[uint]bool, r.size())
 
@@ -167,8 +160,7 @@ func (r *Raus) subscribe(ctx context.Context) {
 	// subscribe to channel, and reading other's id (3 sec)
 	pubsub, err := c.Subscribe(r.pubSubChannel)
 	if err != nil {
-		r.raiseError(err)
-		return
+		return err
 	}
 	timeout := 3 * time.Second
 	start := time.Now()
@@ -176,8 +168,7 @@ LISTING:
 	for time.Since(start) < timeout {
 		select {
 		case <-ctx.Done():
-			r.raiseError(errors.New("canceled"))
-			return
+			return ctx.Err()
 		default:
 		}
 		_msg, err := pubsub.ReceiveTimeout(timeout)
@@ -193,33 +184,23 @@ LISTING:
 			}
 			if xuuid == r.uuid {
 				// other's uuid is same to myself (X_X)
-				r.raiseError(errors.New("duplicate uuid"))
-				return
+				return errors.New("duplicate uuid")
 			}
 			log.Printf("xuuid:%s xid:%d", xuuid, xid)
 			usedIds[xid] = true
 		case *redis.Subscription:
 		default:
-			r.raiseError(fmt.Errorf("unknown redis message: %#v", _msg))
-			return
+			return fmt.Errorf("unknown redis message: %#v", _msg)
 		}
 	}
 
 	pubsub.Unsubscribe()
 
-	select {
-	case <-ctx.Done():
-		r.raiseError(ctx.Err())
-		return
-	default:
-	}
-
 LOCKING:
 	for {
 		select {
 		case <-ctx.Done():
-			r.raiseError(ctx.Err())
-			return
+			return ctx.Err()
 		default:
 		}
 		candidate := make([]uint, 0, MaxCandidate)
@@ -233,8 +214,7 @@ LOCKING:
 			}
 		}
 		if len(candidate) == 0 {
-			r.raiseError(errors.New("no more available id"))
-			return
+			return errors.New("no more available id")
 		}
 		log.Printf("candidate ids: %v", candidate)
 		// pick up randomly
@@ -248,19 +228,18 @@ LOCKING:
 			LockExpires,            // expiration
 		)
 		if err := res.Err(); err != nil {
-			r.raiseError(err)
-			return
+			return err
 		}
 		if res.Val() {
 			log.Println("got lock for", id)
 			r.id = id
-			r.channel <- nil // success!
 			break LOCKING
 		} else {
 			log.Println("could not get lock for", id)
 			usedIds[id] = true
 		}
 	}
+	return nil
 }
 
 func parsePayload(payload string) (string, uint, error) {
@@ -281,6 +260,7 @@ func newPayload(uuid string, id uint) string {
 
 func (r *Raus) publish(ctx context.Context) {
 	c := redis.NewClient(r.redisOptions)
+	defer close(r.channel)
 	defer func() {
 		c.Close()
 	}()
@@ -297,14 +277,13 @@ func (r *Raus) publish(ctx context.Context) {
 			} else {
 				log.Printf("remove a lock key %s successfully", r.lockKey())
 			}
-			close(r.channel)
 			return
 		case <-ticker.C:
 			err := r.holdLock(c)
 			if err != nil {
 				log.Println(err)
 				if isFatal(err) {
-					r.raiseError(err)
+					r.channel <- err
 					return
 				}
 				c.Close()
