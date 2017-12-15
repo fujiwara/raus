@@ -298,16 +298,15 @@ func (r *Raus) holdLock(c *redis.Client) error {
 		return errors.Wrap(err, "PUBLISH failed")
 	}
 
-	res, err := c.GetSet(r.lockKey(), r.uuid).Result()
+	pipe := c.TxPipeline()
+	getset := pipe.GetSet(r.lockKey(), r.uuid)
+	pipe.Expire(r.lockKey(), LockExpires)
+	_, err := pipe.Exec()
 	if err != nil {
-		return errors.Wrap(err, "GETSET failed")
+		return errors.Wrap(err, "GETSET or EXPIRE failed")
 	}
-	if res != r.uuid {
-		return fatalError{fmt.Errorf("unexpected uuid got: %s", res)}
-	}
-
-	if err := c.Expire(r.lockKey(), LockExpires).Err(); err != nil {
-		return errors.Wrap(err, "EXPIRE failed")
+	if v := getset.Val(); v != r.uuid {
+		return fatalError{fmt.Errorf("unexpected uuid got: %s", v)}
 	}
 	return nil
 }
