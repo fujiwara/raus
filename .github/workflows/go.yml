@@ -24,7 +24,7 @@ jobs:
       uses: shogo82148/actions-setup-redis@v1
       with:
         redis-version: '6.x'
-        redis-port: 26379
+        auto-start: "false"
 
     - name: Build & Test
       run: |

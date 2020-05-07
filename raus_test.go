@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -51,24 +50,14 @@ var parseTestSet = []parseTest{
 	},
 }
 
-func testWithLocalRedis(run func() int) int {
+func TestMain(m *testing.M) {
 	conf := redistest.Config{"port": "26379", "save": ""}
 	s, err := redistest.NewServer(true, conf)
 	if err != nil {
 		panic(err)
 	}
-	defer s.Stop()
-	return run()
-}
-
-func TestMain(m *testing.M) {
-	var code int
-	if path, err := exec.LookPath("redis-server"); err == nil {
-		log.Printf("testing with local %s", path)
-		code = testWithLocalRedis(m.Run)
-	} else {
-		code = m.Run()
-	}
+	code := m.Run()
+	s.Stop()
 	os.Exit(code)
 }
 
