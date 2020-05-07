@@ -1,16 +1,15 @@
 package raus_test
 
 import (
+	"context"
 	"log"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"golang.org/x/net/context"
-
 	"github.com/fujiwara/raus"
-	"github.com/soh335/go-test-redisserver"
+	redistest "github.com/soh335/go-test-redisserver"
 	"gopkg.in/redis.v5"
 )
 
@@ -52,16 +51,12 @@ var parseTestSet = []parseTest{
 }
 
 func TestMain(m *testing.M) {
-	conf := make(redistest.Config)
-	conf["port"] = "26379"
-	conf["save"] = ""
+	conf := redistest.Config{"port": "26379", "save": ""}
 	s, err := redistest.NewServer(true, conf)
 	if err != nil {
 		panic(err)
 	}
-
 	code := m.Run()
-
 	s.Stop()
 	os.Exit(code)
 }
@@ -110,7 +105,7 @@ func ExampleNew() {
 
 	r, _ := raus.New("redis://localhost:26379", 0, 3)
 	id, ch, _ := r.Get(ctx)
-	log.Println("Got id %d", id)
+	log.Printf("Got id %d", id)
 
 	// watch error
 	var wg sync.WaitGroup
