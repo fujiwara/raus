@@ -18,9 +18,14 @@ jobs:
       id: go
 
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v1
+      uses: actions/checkout@v2
+
+    - name: setup reids
+      uses: shogo82148/actions-setup-redis@v1
+      with:
+        redis-version: '6.x'
+        redis-port: 26379
 
     - name: Build & Test
       run: |
-        docker run -d -p 26379:6379 redis:5
         go test -v .
