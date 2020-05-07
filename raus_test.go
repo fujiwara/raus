@@ -51,20 +51,24 @@ var parseTestSet = []parseTest{
 	},
 }
 
+func testWithLocalRedis(run func() int) int {
+	conf := redistest.Config{"port": "26379", "save": ""}
+	s, err := redistest.NewServer(true, conf)
+	if err != nil {
+		panic(err)
+	}
+	defer s.Stop()
+	return run()
+}
+
 func TestMain(m *testing.M) {
-	var s *redistest.Server
+	var code int
 	if path, err := exec.LookPath("redis-server"); err == nil {
 		log.Printf("testing with local %s", path)
-		conf := make(redistest.Config)
-		conf["port"] = "26379"
-		conf["save"] = ""
-		s, err = redistest.NewServer(true, conf)
-		if err != nil {
-			panic(err)
-		}
+		code = testWithLocalRedis(m.Run)
+	} else {
+		code = m.Run()
 	}
-	code := m.Run()
-	s.Stop()
 	os.Exit(code)
 }
 
