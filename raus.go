@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/satori/go.uuid"
-	"gopkg.in/redis.v5"
 )
 
 type Raus struct {
@@ -37,9 +37,11 @@ const (
 )
 
 var (
-	MaxCandidate = 10
-	LockExpires  = 60 * time.Second
-	log          Logger
+	MaxCandidate     = 10
+	LockExpires      = 60 * time.Second
+	SubscribeTimeout = time.Second * 3
+	CleanupTimeout   = time.Second * 30
+	log              Logger
 )
 
 type Logger interface {
@@ -85,16 +87,19 @@ func New(redisURI string, min, max uint) (*Raus, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	u, err := uuid.NewRandom()
+	if err != nil {
+		return nil, err
+	}
 	return &Raus{
 		rand:          rand.New(rand.NewSource(s)),
-		uuid:          uuid.NewV4().String(),
+		uuid:          u.String(),
 		min:           min,
 		max:           max,
 		redisOptions:  op,
 		namespace:     ns,
 		pubSubChannel: ns + pubSubChannelSuffix,
-		channel:       make(chan error, 0),
+		channel:       make(chan error),
 	}, nil
 }
 
@@ -158,20 +163,16 @@ func (r *Raus) subscribe(ctx context.Context) error {
 	defer c.Close()
 
 	// subscribe to channel, and reading other's id (3 sec)
-	pubsub, err := c.Subscribe(r.pubSubChannel)
-	if err != nil {
-		return err
-	}
-	timeout := 3 * time.Second
+	pubsub := c.Subscribe(ctx, r.pubSubChannel)
 	start := time.Now()
 LISTING:
-	for time.Since(start) < timeout {
+	for time.Since(start) < SubscribeTimeout {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		_msg, err := pubsub.ReceiveTimeout(timeout)
+		_msg, err := pubsub.ReceiveTimeout(ctx, SubscribeTimeout)
 		if err != nil {
 			break LISTING
 		}
@@ -194,7 +195,7 @@ LISTING:
 		}
 	}
 
-	pubsub.Unsubscribe()
+	pubsub.Unsubscribe(ctx)
 
 LOCKING:
 	for {
@@ -223,6 +224,7 @@ LOCKING:
 		// try to lock by SET NX
 		log.Println("trying to get lock key", r.candidateLockKey(id))
 		res := c.SetNX(
+			ctx,
 			r.candidateLockKey(id), // key
 			r.uuid,                 // value
 			LockExpires,            // expiration
@@ -271,7 +273,9 @@ func (r *Raus) publish(ctx context.Context) {
 		case <-ctx.Done():
 			log.Println("shutting down")
 			// returns after releasing a held lock
-			err := c.Del(r.lockKey()).Err()
+			ctx2, cancel := context.WithTimeout(context.Background(), CleanupTimeout)
+			defer cancel()
+			err := c.Del(ctx2, r.lockKey()).Err()
 			if err != nil {
 				log.Println(err)
 			} else {
@@ -279,7 +283,7 @@ func (r *Raus) publish(ctx context.Context) {
 			}
 			return
 		case <-ticker.C:
-			err := r.holdLock(c)
+			err := r.holdLock(ctx, c)
 			if err != nil {
 				log.Println(err)
 				if isFatal(err) {
@@ -293,15 +297,15 @@ func (r *Raus) publish(ctx context.Context) {
 	}
 }
 
-func (r *Raus) holdLock(c *redis.Client) error {
-	if err := c.Publish(r.pubSubChannel, newPayload(r.uuid, r.id)).Err(); err != nil {
+func (r *Raus) holdLock(ctx context.Context, c *redis.Client) error {
+	if err := c.Publish(ctx, r.pubSubChannel, newPayload(r.uuid, r.id)).Err(); err != nil {
 		return errors.Wrap(err, "PUBLISH failed")
 	}
 
 	pipe := c.TxPipeline()
-	getset := pipe.GetSet(r.lockKey(), r.uuid)
-	pipe.Expire(r.lockKey(), LockExpires)
-	_, err := pipe.Exec()
+	getset := pipe.GetSet(ctx, r.lockKey(), r.uuid)
+	pipe.Expire(ctx, r.lockKey(), LockExpires)
+	_, err := pipe.Exec(ctx)
 	if err != nil {
 		return errors.Wrap(err, "GETSET or EXPIRE failed")
 	}

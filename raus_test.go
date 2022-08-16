@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/fujiwara/raus"
+	"github.com/go-redis/redis/v8"
 	redistest "github.com/soh335/go-test-redisserver"
-	"gopkg.in/redis.v5"
 )
 
 var invalidMinMaxSet = [][]uint{
-	[]uint{0, 0},
-	[]uint{2, 1},
+	{0, 0},
+	{2, 1},
 }
 
 type parseTest struct {
@@ -32,7 +32,7 @@ var parseTestErrorSet = []string{
 }
 
 var parseTestSet = []parseTest{
-	parseTest{
+	{
 		"redis://localhost:6379",
 		&redis.Options{
 			Addr: "localhost:6379",
@@ -40,7 +40,7 @@ var parseTestSet = []parseTest{
 		},
 		raus.DefaultNamespace,
 	},
-	parseTest{
+	{
 		"redis://127.0.0.1/2?ns=foo",
 		&redis.Options{
 			Addr: "127.0.0.1:6379",
@@ -140,9 +140,7 @@ func TestGet(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if id < 0 {
-		t.Error("cloudnot get id")
-	}
+	log.Printf("Got id %d", id)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -174,9 +172,7 @@ func TestGetRace(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			if id < 0 {
-				t.Error("cloudnot get id")
-			}
+			log.Printf("Got id %d", id)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
