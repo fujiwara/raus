@@ -54,7 +54,7 @@ var parseTestSet = []parseTest{
 		"redis://127.0.0.1/2?ns=foo",
 		&raus.RedisOptions{
 			Addrs: []string{"127.0.0.1:6379"},
-			DB:    3,
+			DB:    2,
 		},
 		"foo",
 	},
