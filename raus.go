@@ -37,9 +37,11 @@ const (
 )
 
 var (
-	MaxCandidate = 10
-	LockExpires  = 60 * time.Second
-	log          Logger
+	MaxCandidate     = 10
+	LockExpires      = 60 * time.Second
+	SubscribeTimeout = time.Second * 3
+	CleanupTimeout   = time.Second * 30
+	log              Logger
 )
 
 type Logger interface {
@@ -162,16 +164,15 @@ func (r *Raus) subscribe(ctx context.Context) error {
 
 	// subscribe to channel, and reading other's id (3 sec)
 	pubsub := c.Subscribe(ctx, r.pubSubChannel)
-	timeout := 3 * time.Second
 	start := time.Now()
 LISTING:
-	for time.Since(start) < timeout {
+	for time.Since(start) < SubscribeTimeout {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		_msg, err := pubsub.ReceiveTimeout(ctx, timeout)
+		_msg, err := pubsub.ReceiveTimeout(ctx, SubscribeTimeout)
 		if err != nil {
 			break LISTING
 		}
@@ -272,7 +273,9 @@ func (r *Raus) publish(ctx context.Context) {
 		case <-ctx.Done():
 			log.Println("shutting down")
 			// returns after releasing a held lock
-			err := c.Del(ctx, r.lockKey()).Err()
+			ctx2, cancel := context.WithTimeout(context.Background(), CleanupTimeout)
+			defer cancel()
+			err := c.Del(ctx2, r.lockKey()).Err()
 			if err != nil {
 				log.Println(err)
 			} else {
