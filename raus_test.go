@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fujiwara/raus"
-	"github.com/go-redis/redis/v8"
+	"github.com/google/go-cmp/cmp"
 	redistest "github.com/soh335/go-test-redisserver"
 )
 
@@ -18,9 +18,18 @@ var invalidMinMaxSet = [][]uint{
 	{2, 1},
 }
 
+var redisURL = "redis://localhost:26379"
+
+func init() {
+	if u := os.Getenv("REDIS_URL"); u != "" {
+		log.Println("REDIS_URL=", u)
+		redisURL = u
+	}
+}
+
 type parseTest struct {
 	URI       string
-	Opt       *redis.Options
+	Opt       *raus.RedisOptions
 	Namespace string
 }
 
@@ -29,36 +38,57 @@ var parseTestErrorSet = []string{
 	"redis:///var/tmp/test.sock",
 	"localhost:6379",
 	"localhost",
+	"rediscluster://127.0.0.1/3",
 }
 
 var parseTestSet = []parseTest{
 	{
 		"redis://localhost:6379",
-		&redis.Options{
-			Addr: "localhost:6379",
-			DB:   0,
+		&raus.RedisOptions{
+			Addrs: []string{"localhost:6379"},
+			DB:    0,
 		},
 		raus.DefaultNamespace,
 	},
 	{
 		"redis://127.0.0.1/2?ns=foo",
-		&redis.Options{
-			Addr: "127.0.0.1:6379",
-			DB:   2,
+		&raus.RedisOptions{
+			Addrs: []string{"127.0.0.1:6379"},
+			DB:    2,
+		},
+		"foo",
+	},
+	{
+		"rediscluster://127.0.0.1/?ns=foo",
+		&raus.RedisOptions{
+			Cluster: true,
+			Addrs:   []string{"127.0.0.1:6379"},
+		},
+		"foo",
+	},
+	{
+		"rediscluster://127.0.0.1:6380/?ns=foo",
+		&raus.RedisOptions{
+			Cluster: true,
+			Addrs:   []string{"127.0.0.1:6380"},
 		},
 		"foo",
 	},
 }
 
 func TestMain(m *testing.M) {
-	conf := redistest.Config{"port": "26379", "save": ""}
-	s, err := redistest.NewServer(true, conf)
-	if err != nil {
-		panic(err)
+	if os.Getenv("REDIS_URL") == "" {
+		conf := redistest.Config{"port": "26379", "save": ""}
+		s, err := redistest.NewServer(true, conf)
+		if err != nil {
+			panic(err)
+		}
+		code := m.Run()
+		s.Stop()
+		os.Exit(code)
+	} else {
+		os.Exit(m.Run())
 	}
-	code := m.Run()
-	s.Stop()
-	os.Exit(code)
 }
 
 func TestParseRedisURI(t *testing.T) {
@@ -68,23 +98,21 @@ func TestParseRedisURI(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if opt.Addr != ts.Opt.Addr {
-			t.Errorf("invalid Addr %s expected %s", opt.Addr, ts.Opt.Addr)
-		}
-		if opt.DB != ts.Opt.DB {
-			t.Errorf("invalid DB %d expected %d", opt.DB, ts.Opt.DB)
+		if diff := cmp.Diff(opt, ts.Opt); diff != "" {
+			t.Error("unexpected options", diff)
 		}
 		if ns != ts.Namespace {
 			t.Errorf("invalid Namespace %s expected %s", ns, ts.Namespace)
 		}
 	}
 
-	for _, s := range parseTestErrorSet {
-		_, _, err := raus.ParseRedisURI(s)
+	for _, ts := range parseTestErrorSet {
+		opt, ns, err := raus.ParseRedisURI(ts)
+		t.Logf("uri %s parsed to %#v %s", ts, opt, ns)
 		if err == nil {
-			t.Errorf("invalid uri %s should be parse error.", s)
+			t.Errorf("invalid uri %s should be parse error.", ts)
 		}
-		t.Logf("uri %s parse error: %s", s, err)
+		//	t.Logf("uri %s parse error: %s", s, err)
 	}
 }
 
@@ -103,7 +131,7 @@ func ExampleNew() {
 	// prepere context
 	ctx, cancel := context.WithCancel(context.Background())
 
-	r, _ := raus.New("redis://localhost:26379", 0, 3)
+	r, _ := raus.New(redisURL, 0, 3)
 	id, ch, _ := r.Get(ctx)
 	log.Printf("Got id %d", id)
 
@@ -132,13 +160,16 @@ func ExampleNew() {
 
 func TestGet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r, err := raus.New("redis://localhost:26379", 0, 3)
+	defer cancel()
+	r, err := raus.New(redisURL, 0, 3)
 	if err != nil {
 		t.Error(err)
 	}
 	id, ch, err := r.Get(ctx)
 	if err != nil {
 		t.Error(err)
+		t.Fail()
+		return
 	}
 	log.Printf("Got id %d", id)
 	var wg sync.WaitGroup
@@ -164,7 +195,7 @@ func TestGetRace(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ctx, cancel := context.WithCancel(context.Background())
-			r, err := raus.New("redis://localhost:26379", 0, 5)
+			r, err := raus.New(redisURL, 0, 5)
 			if err != nil {
 				t.Error(err)
 			}
