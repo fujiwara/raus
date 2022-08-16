@@ -1,4 +1,4 @@
-name: Go
+name: test
 on: [push]
 jobs:
   test:
@@ -28,7 +28,3 @@ jobs:
       - name: Build & Test
         run: |
           go test -v ./...
-
-      - name: cluster test
-        run: |
-          bash cluster-ci.sh
