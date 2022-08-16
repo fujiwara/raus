@@ -11,7 +11,8 @@ services:
       - /bin/sh
       - -c
       - |
-        sleep 120
+        sleep 10
+        go test -v ./...
 
   redis-node-0:
     depends_on:
