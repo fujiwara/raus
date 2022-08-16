@@ -25,7 +25,7 @@ type Raus struct {
 	id            uint
 	min           uint
 	max           uint
-	redisOptions  *redis.Options
+	redisOptions  *RedisOptions
 	namespace     string
 	pubSubChannel string
 	channel       chan error
@@ -104,24 +104,40 @@ func New(redisURI string, min, max uint) (*Raus, error) {
 }
 
 // ParseRedisURI parses uri for redis (redis://host:port/db?ns=namespace)
-func ParseRedisURI(s string) (*redis.Options, string, error) {
+func ParseRedisURI(s string) (*RedisOptions, string, error) {
 	u, err := url.Parse(s)
 	if err != nil {
 		return nil, "", err
 	}
-	if u.Scheme != "redis" {
-		return nil, "", errors.New("invalid scheme")
+	op := &RedisOptions{}
+	switch u.Scheme {
+	case "redis":
+		op.Cluster = false
+	case "rediscluster":
+		op.Cluster = true
+	default:
+		return nil, "", fmt.Errorf("invalid scheme %s", u.Scheme)
 	}
-	op := &redis.Options{}
 	h, p, err := net.SplitHostPort(u.Host)
 	if err != nil {
 		h = u.Host
 		p = "6379"
 	}
-	op.Network = "tcp"
-	op.Addr = h + ":" + p
+	op.Addrs = []string{h + ":" + p}
+
+	if u.User != nil {
+		if uname := u.User.Username(); uname != "" {
+			op.Username = uname
+		}
+		if pass, ok := u.User.Password(); ok {
+			op.Password = pass
+		}
+	}
+
 	if u.Path == "" || u.Path == "/" {
 		op.DB = 0
+	} else if op.Cluster {
+		return nil, "", fmt.Errorf("database is not supported for redis cluster")
 	} else {
 		ps := strings.Split(u.Path, "/")
 		if len(ps) > 1 {
@@ -159,7 +175,7 @@ func (r *Raus) subscribe(ctx context.Context) error {
 	// table for looking up unused id
 	usedIds := make(map[uint]bool, r.size())
 
-	c := redis.NewClient(r.redisOptions)
+	c := r.redisOptions.NewClient()
 	defer c.Close()
 
 	// subscribe to channel, and reading other's id (3 sec)
@@ -230,7 +246,7 @@ LOCKING:
 			LockExpires,            // expiration
 		)
 		if err := res.Err(); err != nil {
-			return err
+			return errors.Wrap(err, "failed to get lock by SET NX")
 		}
 		if res.Val() {
 			log.Println("got lock for", id)
@@ -261,7 +277,7 @@ func newPayload(uuid string, id uint) string {
 }
 
 func (r *Raus) publish(ctx context.Context) {
-	c := redis.NewClient(r.redisOptions)
+	c := r.redisOptions.NewClient()
 	defer close(r.channel)
 	defer func() {
 		c.Close()
@@ -291,13 +307,13 @@ func (r *Raus) publish(ctx context.Context) {
 					return
 				}
 				c.Close()
-				c = redis.NewClient(r.redisOptions)
+				c = r.redisOptions.NewClient()
 			}
 		}
 	}
 }
 
-func (r *Raus) holdLock(ctx context.Context, c *redis.Client) error {
+func (r *Raus) holdLock(ctx context.Context, c RedisClient) error {
 	if err := c.Publish(ctx, r.pubSubChannel, newPayload(r.uuid, r.id)).Err(); err != nil {
 		return errors.Wrap(err, "PUBLISH failed")
 	}

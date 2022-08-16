@@ -27,4 +27,8 @@ jobs:
 
       - name: Build & Test
         run: |
-          go test -v .
+          go test -v ./...
+
+      - name: cluster test
+        run: |
+          bash cluster-ci.sh
