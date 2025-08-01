@@ -1,7 +1,7 @@
 version: '2'
 services:
   app:
-    image: docker.io/golang:1.19-bullseye
+    image: docker.io/golang:1.24-bookworm
     volumes:
       - .:/go/src/github.com/fujiwara/raus
     working_dir: /go/src/github.com/fujiwara/raus
