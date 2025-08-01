@@ -22,7 +22,7 @@ jobs:
       - name: setup redis
         uses: shogo82148/actions-setup-redis@v1
         with:
-          redis-version: "6.x"
+          redis-version: "7.x"
           auto-start: "false"
 
       - name: Build & Test
