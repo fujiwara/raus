@@ -16,7 +16,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 )
 
 type Raus struct {
@@ -81,7 +80,7 @@ func New(redisURI string, min, max uint) (*Raus, error) {
 		s = time.Now().UnixNano()
 	}
 	if min >= max {
-		return nil, errors.New("max should be greater than min")
+		return nil, fmt.Errorf("max should be greater than min")
 	}
 	op, ns, err := ParseRedisURI(redisURI)
 	if err != nil {
@@ -201,7 +200,7 @@ LISTING:
 			}
 			if xuuid == r.uuid {
 				// other's uuid is same to myself (X_X)
-				return errors.New("duplicate uuid")
+				return fmt.Errorf("duplicate uuid")
 			}
 			log.Printf("xuuid:%s xid:%d", xuuid, xid)
 			usedIds[xid] = true
@@ -231,7 +230,7 @@ LOCKING:
 			}
 		}
 		if len(candidate) == 0 {
-			return errors.New("no more available id")
+			return fmt.Errorf("no more available id")
 		}
 		log.Printf("candidate ids: %v", candidate)
 		// pick up randomly
@@ -246,7 +245,7 @@ LOCKING:
 			LockExpires,            // expiration
 		)
 		if err := res.Err(); err != nil {
-			return errors.Wrap(err, "failed to get lock by SET NX")
+			return fmt.Errorf("failed to get lock by SET NX: %w", err)
 		}
 		if res.Val() {
 			log.Println("got lock for", id)
@@ -315,7 +314,7 @@ func (r *Raus) publish(ctx context.Context) {
 
 func (r *Raus) holdLock(ctx context.Context, c RedisClient) error {
 	if err := c.Publish(ctx, r.pubSubChannel, newPayload(r.uuid, r.id)).Err(); err != nil {
-		return errors.Wrap(err, "PUBLISH failed")
+		return fmt.Errorf("PUBLISH failed: %w", err)
 	}
 
 	pipe := c.TxPipeline()
@@ -323,7 +322,7 @@ func (r *Raus) holdLock(ctx context.Context, c RedisClient) error {
 	pipe.Expire(ctx, r.lockKey(), LockExpires)
 	_, err := pipe.Exec(ctx)
 	if err != nil {
-		return errors.Wrap(err, "GETSET or EXPIRE failed")
+		return fmt.Errorf("GETSET or EXPIRE failed: %w", err)
 	}
 	if v := getset.Val(); v != r.uuid {
 		return fatalError{fmt.Errorf("unexpected uuid got: %s", v)}
