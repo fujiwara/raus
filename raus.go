@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 type Raus struct {
@@ -44,7 +44,6 @@ var (
 	defaultLogger    = slog.New(slog.NewTextHandler(os.Stderr, nil))
 )
 
-
 type fatal interface {
 	isFatal() bool
 }
@@ -61,8 +60,6 @@ type fatalError struct {
 func (e fatalError) isFatal() bool {
 	return true
 }
-
-
 
 // SetDefaultSlogLogger sets the default slog.Logger for new Raus instances.
 func SetDefaultSlogLogger(l *slog.Logger) {
