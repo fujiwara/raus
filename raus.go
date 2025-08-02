@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	stdlog "log"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/url"
@@ -28,6 +29,7 @@ type Raus struct {
 	namespace     string
 	pubSubChannel string
 	channel       chan error
+	logger        *slog.Logger
 }
 
 const (
@@ -41,6 +43,7 @@ var (
 	SubscribeTimeout = time.Second * 3
 	CleanupTimeout   = time.Second * 30
 	log              Logger
+	defaultLogger    = slog.New(slog.NewTextHandler(os.Stderr, nil))
 )
 
 type Logger interface {
@@ -73,6 +76,16 @@ func SetLogger(l Logger) {
 	log = l
 }
 
+// SetDefaultSlogLogger sets the default slog.Logger for new Raus instances.
+func SetDefaultSlogLogger(l *slog.Logger) {
+	defaultLogger = l
+}
+
+// SetSlogLogger sets the slog.Logger for this Raus instance.
+func (r *Raus) SetSlogLogger(l *slog.Logger) {
+	r.logger = l
+}
+
 // New creates *Raus object.
 func New(redisURI string, min, max uint) (*Raus, error) {
 	var s int64
@@ -99,6 +112,7 @@ func New(redisURI string, min, max uint) (*Raus, error) {
 		namespace:     ns,
 		pubSubChannel: ns + pubSubChannelSuffix,
 		channel:       make(chan error),
+		logger:        defaultLogger,
 	}, nil
 }
 
@@ -195,14 +209,14 @@ LISTING:
 		case *redis.Message:
 			xuuid, xid, err := parsePayload(msg.Payload)
 			if err != nil {
-				log.Println(err)
+				r.logger.Warn("failed to parse payload", "error", err)
 				break
 			}
 			if xuuid == r.uuid {
 				// other's uuid is same to myself (X_X)
 				return fmt.Errorf("duplicate uuid")
 			}
-			log.Printf("xuuid:%s xid:%d", xuuid, xid)
+			r.logger.Debug("discovered other instance", "uuid", xuuid, "machine_id", xid)
 			usedIds[xid] = true
 		case *redis.Subscription:
 		default:
@@ -232,12 +246,12 @@ LOCKING:
 		if len(candidate) == 0 {
 			return fmt.Errorf("no more available id")
 		}
-		log.Printf("candidate ids: %v", candidate)
+		r.logger.Debug("selecting candidate machine ids", "candidates", candidate, "available_count", len(candidate))
 		// pick up randomly
 		id := candidate[uint(r.rand.Intn(len(candidate)))]
 
 		// try to lock by SET NX
-		log.Println("trying to get lock key", r.candidateLockKey(id))
+		r.logger.Debug("attempting to acquire machine id lock", "machine_id", id, "lock_key", r.candidateLockKey(id))
 		res := c.SetNX(
 			ctx,
 			r.candidateLockKey(id), // key
@@ -248,11 +262,11 @@ LOCKING:
 			return fmt.Errorf("failed to get lock by SET NX: %w", err)
 		}
 		if res.Val() {
-			log.Println("got lock for", id)
+			r.logger.Info("machine id allocated successfully", "machine_id", id, "uuid", r.uuid, "namespace", r.namespace)
 			r.id = id
 			break LOCKING
 		} else {
-			log.Println("could not get lock for", id)
+			r.logger.Debug("machine id already in use", "machine_id", id)
 			usedIds[id] = true
 		}
 	}
@@ -286,21 +300,21 @@ func (r *Raus) publish(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("shutting down")
+			r.logger.Info("shutting down machine id coordination", "machine_id", r.id, "namespace", r.namespace)
 			// returns after releasing a held lock
 			ctx2, cancel := context.WithTimeout(context.Background(), CleanupTimeout)
 			defer cancel()
 			err := c.Del(ctx2, r.lockKey()).Err()
 			if err != nil {
-				log.Println(err)
+				r.logger.Error("failed to release machine id lock", "error", err, "lock_key", r.lockKey())
 			} else {
-				log.Printf("remove a lock key %s successfully", r.lockKey())
+				r.logger.Info("machine id lock released successfully", "machine_id", r.id, "lock_key", r.lockKey())
 			}
 			return
 		case <-ticker.C:
 			err := r.holdLock(ctx, c)
 			if err != nil {
-				log.Println(err)
+				r.logger.Error("machine id coordination error", "error", err, "machine_id", r.id)
 				if isFatal(err) {
 					r.channel <- err
 					return
