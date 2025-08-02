@@ -8,6 +8,7 @@ permissions:
   packages: write
   contents: write
   actions: write
+  issues: write
 
 jobs:
   deploy:
