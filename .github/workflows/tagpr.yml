@@ -1,0 +1,22 @@
+name: tagpr
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  pull-requests: write
+  packages: write
+  contents: write
+  actions: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: Songmu/tagpr@v1
+        id: tagpr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
