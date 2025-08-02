@@ -2,6 +2,10 @@
 
 ## [v0.3.0](https://github.com/fujiwara/raus/compare/v0.2.0...v0.3.0) - 2025-08-02
 - Migrate to log/slog with structured logging by @fujiwara in https://github.com/fujiwara/raus/pull/9
+- Release for v0.3.0 by @github-actions[bot] in https://github.com/fujiwara/raus/pull/10
+
+## [v0.3.0](https://github.com/fujiwara/raus/compare/v0.2.0...v0.3.0) - 2025-08-02
+- Migrate to log/slog with structured logging by @fujiwara in https://github.com/fujiwara/raus/pull/9
 
 ## [v0.2.0](https://github.com/fujiwara/raus/compare/v0.1.0...v0.2.0) - 2025-08-01
 - Modernize: Update Go 1.23 and replace pkg/errors with fmt.Errorf by @fujiwara in https://github.com/fujiwara/raus/pull/5
