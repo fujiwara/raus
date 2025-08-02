@@ -5,7 +5,6 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
-	stdlog "log"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -42,14 +41,9 @@ var (
 	LockExpires      = 60 * time.Second
 	SubscribeTimeout = time.Second * 3
 	CleanupTimeout   = time.Second * 30
-	log              Logger
 	defaultLogger    = slog.New(slog.NewTextHandler(os.Stderr, nil))
 )
 
-type Logger interface {
-	Println(...interface{})
-	Printf(string, ...interface{})
-}
 
 type fatal interface {
 	isFatal() bool
@@ -68,13 +62,7 @@ func (e fatalError) isFatal() bool {
 	return true
 }
 
-func init() {
-	log = stdlog.New(os.Stderr, "", stdlog.LstdFlags) // default logger
-}
 
-func SetLogger(l Logger) {
-	log = l
-}
 
 // SetDefaultSlogLogger sets the default slog.Logger for new Raus instances.
 func SetDefaultSlogLogger(l *slog.Logger) {

@@ -96,17 +96,22 @@ func TestSlogIntegration(t *testing.T) {
 	t.Logf("Generated %d log entries with structured logging", len(lines)-1)
 }
 
-func TestBackwardCompatibility(t *testing.T) {
-	// Test that old Logger interface still works
-	originalLogger := &testLogger{}
-	raus.SetLogger(originalLogger)
+func TestDefaultSlogLogger(t *testing.T) {
+	// Test that default slog logger works
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	customLogger := slog.New(handler)
+	
+	// Set global default
+	raus.SetDefaultSlogLogger(customLogger)
 	
 	r, err := raus.New(redisURL, 0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	
-	// The instance should still have a valid slog logger
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	
@@ -124,16 +129,10 @@ func TestBackwardCompatibility(t *testing.T) {
 	case <-errCh:
 	case <-time.After(2 * time.Second):
 	}
-}
-
-type testLogger struct {
-	messages []string
-}
-
-func (l *testLogger) Println(v ...interface{}) {
-	// Implementation not needed for this test
-}
-
-func (l *testLogger) Printf(format string, v ...interface{}) {
-	// Implementation not needed for this test
+	
+	// Verify logs were written to our custom logger
+	output := buf.String()
+	if output == "" {
+		t.Error("No log output generated with custom default logger")
+	}
 }
