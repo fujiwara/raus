@@ -187,6 +187,48 @@ func TestGet(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGetWithoutDiscovery(t *testing.T) {
+	// Do not call t.Parallel(): this test mutates the package-level SubscribeTimeout
+	// variable, which would race with other tests that read it concurrently.
+	// Skip Discovery by setting SubscribeTimeout to 0.
+	orig := raus.SubscribeTimeout
+	raus.SubscribeTimeout = 0
+	t.Cleanup(func() { raus.SubscribeTimeout = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	r, err := raus.New(redisURL, 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With Discovery skipped, Get() should complete well under SubscribeTimeout (3s default).
+	start := time.Now()
+	id, ch, err := r.Get(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Errorf("Get() took %v, expected < 2s (Discovery should be skipped)", elapsed)
+	}
+	t.Logf("Got id %d in %v", id, elapsed)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err, more := <-ch
+		if !more {
+			return
+		}
+		t.Error(err)
+	}()
+	cancel()
+	wg.Wait()
+}
+
 func TestGetRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i <= 5; i++ {
