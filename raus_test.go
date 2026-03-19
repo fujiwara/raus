@@ -187,6 +187,114 @@ func TestGet(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCandidatesSpreadAcrossRange(t *testing.T) {
+	// Do not call t.Parallel(): this test mutates the package-level SubscribeTimeout
+	// variable, which would race with other tests that read it concurrently.
+	orig := raus.SubscribeTimeout
+	raus.SubscribeTimeout = 0
+	t.Cleanup(func() { raus.SubscribeTimeout = orig })
+
+	const N = 20
+	const rangeMax = uint(1023)
+	// Use a dedicated namespace to avoid interference with other tests.
+	spreadURL := redisURL + "?ns=candidate_spread"
+
+	ids := make([]uint, 0, N)
+	chs := make([]chan error, 0, N)
+	cancels := make([]context.CancelFunc, 0, N)
+
+	for range N {
+		ctx, cancel := context.WithCancel(context.Background())
+		r, err := raus.New(spreadURL, 0, rangeMax)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		id, ch, err := r.Get(ctx)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		chs = append(chs, ch)
+		cancels = append(cancels, cancel)
+	}
+
+	// Compute max before cleanup.
+	maxID := uint(0)
+	for _, id := range ids {
+		if id > maxID {
+			maxID = id
+		}
+	}
+
+	// Clean up all instances and wait for locks to be released.
+	var wg sync.WaitGroup
+	for i := range cancels {
+		cancels[i]()
+		wg.Add(1)
+		go func(ch chan error) {
+			defer wg.Done()
+			err, more := <-ch
+			if !more {
+				return
+			}
+			t.Error(err)
+		}(chs[i])
+	}
+	wg.Wait()
+
+	// With random candidate offset, sequential allocations spread across the full range.
+	// Without randomization, all N IDs fall in [0, N-1] since candidates always start
+	// from min. For N=20 random draws from [0, 1023], P(max < 50) is negligible.
+	if maxID < 50 {
+		t.Errorf("max allocated ID is %d, expected > 50: "+
+			"candidates may not be starting from a random offset (IDs: %v)", maxID, ids)
+	}
+}
+
+func TestGetWithoutDiscovery(t *testing.T) {
+	// Do not call t.Parallel(): this test mutates the package-level SubscribeTimeout
+	// variable, which would race with other tests that read it concurrently.
+	// Skip Discovery by setting SubscribeTimeout to 0.
+	orig := raus.SubscribeTimeout
+	raus.SubscribeTimeout = 0
+	t.Cleanup(func() { raus.SubscribeTimeout = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	r, err := raus.New(redisURL, 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With Discovery skipped, Get() should complete well under SubscribeTimeout (3s default).
+	start := time.Now()
+	id, ch, err := r.Get(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Errorf("Get() took %v, expected < 2s (Discovery should be skipped)", elapsed)
+	}
+	t.Logf("Got id %d in %v", id, elapsed)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err, more := <-ch
+		if !more {
+			return
+		}
+		t.Error(err)
+	}()
+	cancel()
+	wg.Wait()
+}
+
 func TestGetRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i <= 5; i++ {

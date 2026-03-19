@@ -176,40 +176,43 @@ func (r *Raus) subscribe(ctx context.Context) error {
 	c := r.redisOptions.NewClient()
 	defer c.Close()
 
-	// subscribe to channel, and reading other's id (3 sec)
-	pubsub := c.Subscribe(ctx, r.pubSubChannel)
-	start := time.Now()
-LISTING:
-	for time.Since(start) < SubscribeTimeout {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		_msg, err := pubsub.ReceiveTimeout(ctx, SubscribeTimeout)
-		if err != nil {
-			break LISTING
-		}
-		switch msg := _msg.(type) {
-		case *redis.Message:
-			xuuid, xid, err := parsePayload(msg.Payload)
+	// Discovery phase: only run when SubscribeTimeout > 0.
+	// When SubscribeTimeout <= 0 (zero or negative), skip Discovery and proceed
+	// directly to the LOCKING phase. Negative values are treated the same as zero.
+	if SubscribeTimeout > 0 {
+		pubsub := c.Subscribe(ctx, r.pubSubChannel)
+		start := time.Now()
+	LISTING:
+		for time.Since(start) < SubscribeTimeout {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			_msg, err := pubsub.ReceiveTimeout(ctx, SubscribeTimeout)
 			if err != nil {
-				r.logger.Warn("failed to parse payload", "error", err)
-				break
+				break LISTING
 			}
-			if xuuid == r.uuid {
-				// other's uuid is same to myself (X_X)
-				return fmt.Errorf("duplicate uuid")
+			switch msg := _msg.(type) {
+			case *redis.Message:
+				xuuid, xid, err := parsePayload(msg.Payload)
+				if err != nil {
+					r.logger.Warn("failed to parse payload", "error", err)
+					break
+				}
+				if xuuid == r.uuid {
+					// other's uuid is same to myself (X_X)
+					return fmt.Errorf("duplicate uuid")
+				}
+				r.logger.Debug("discovered other instance", "uuid", xuuid, "machine_id", xid)
+				usedIds[xid] = true
+			case *redis.Subscription:
+			default:
+				return fmt.Errorf("unknown redis message: %#v", _msg)
 			}
-			r.logger.Debug("discovered other instance", "uuid", xuuid, "machine_id", xid)
-			usedIds[xid] = true
-		case *redis.Subscription:
-		default:
-			return fmt.Errorf("unknown redis message: %#v", _msg)
 		}
+		pubsub.Unsubscribe(ctx)
 	}
-
-	pubsub.Unsubscribe(ctx)
 
 LOCKING:
 	for {
@@ -219,7 +222,10 @@ LOCKING:
 		default:
 		}
 		candidate := make([]uint, 0, MaxCandidate)
-		for i := r.min; i <= r.max; i++ {
+		rangeSize := r.max - r.min + 1
+		startOffset := uint(r.rand.Intn(int(rangeSize)))
+		for j := uint(0); j < rangeSize; j++ {
+			i := r.min + (startOffset+j)%rangeSize
 			if usedIds[i] {
 				continue
 			}
