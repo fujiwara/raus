@@ -15,10 +15,8 @@ go test -v ./...
 # Run a single test
 go test -v -run TestGet ./...
 
-# Run integration tests with Redis Cluster (requires Docker)
-docker compose up --exit-code-from app
-# or
-./cluster-ci.sh
+# Run integration tests with an external Redis Cluster
+REDIS_URL="rediscluster://:password@127.0.0.1:16379" go test -v ./...
 
 # Format and fix code (must run before committing)
 go fmt ./...
@@ -44,4 +42,4 @@ Tests use `github.com/soh335/go-test-redisserver` to spin up a temporary Redis i
 ## CI
 
 - GitHub Actions runs `go test -v ./...` with Redis 7.x.
-- A separate `cluster.yml` workflow tests Redis Cluster via Docker Compose.
+- A separate `cluster.yml` workflow tests Redis Cluster using [fujiwara/redis-cluster-action](https://github.com/fujiwara/redis-cluster-action).
