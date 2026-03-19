@@ -222,7 +222,10 @@ LOCKING:
 		default:
 		}
 		candidate := make([]uint, 0, MaxCandidate)
-		for i := r.min; i <= r.max; i++ {
+		rangeSize := r.max - r.min + 1
+		startOffset := uint(r.rand.Intn(int(rangeSize)))
+		for j := uint(0); j < rangeSize; j++ {
+			i := r.min + (startOffset+j)%rangeSize
 			if usedIds[i] {
 				continue
 			}
