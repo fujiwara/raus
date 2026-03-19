@@ -10,10 +10,10 @@ import (
 type RedisClient interface {
 	Close() error
 	Subscribe(ctx context.Context, channels ...string) *redis.PubSub
-	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd
 	Get(ctx context.Context, key string) *redis.StringCmd
 	Del(ctx context.Context, keys ...string) *redis.IntCmd
-	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
+	Publish(ctx context.Context, channel string, message any) *redis.IntCmd
 	TxPipeline() redis.Pipeliner
 }
 

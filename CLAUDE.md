@@ -20,8 +20,9 @@ docker compose up --exit-code-from app
 # or
 ./cluster-ci.sh
 
-# Format code (must run before committing)
+# Format and fix code (must run before committing)
 go fmt ./...
+go fix ./...
 ```
 
 Tests use `github.com/soh335/go-test-redisserver` to spin up a temporary Redis instance automatically. Set `REDIS_URL` env var to use an external Redis instead.
@@ -42,5 +43,5 @@ Tests use `github.com/soh335/go-test-redisserver` to spin up a temporary Redis i
 
 ## CI
 
-- GitHub Actions runs `go test -v ./...` on Go 1.23 and 1.24 with Redis 7.x.
+- GitHub Actions runs `go test -v ./...` on Go 1.25 and 1.26 with Redis 7.x.
 - A separate `cluster.yml` workflow tests Redis Cluster via Docker Compose.
