@@ -1,97 +1,53 @@
-version: '2'
 services:
-  app:
-    image: docker.io/golang:1.24-bookworm
-    volumes:
-      - .:/go/src/github.com/fujiwara/raus
-    working_dir: /go/src/github.com/fujiwara/raus
-    environment:
-      - 'REDIS_URL=rediscluster://:bitnami@redis-node-0:6379'
-    command:
-      - /bin/sh
-      - -c
-      - |
-        sleep 10
-        go test -v ./...
-
   redis-node-0:
-    depends_on:
-      - app
-    image: docker.io/bitnami/redis-cluster:7.4
+    image: docker.io/redis:7
+    network_mode: host
+    command: redis-server /usr/local/etc/redis/redis.conf --port 16379
     volumes:
-      - redis-cluster_data-0:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
+      - ./redis-cluster.conf:/usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "testpass", "-p", "16379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis-node-1:
-    depends_on:
-      - app
-    image: docker.io/bitnami/redis-cluster:7.4
+    image: docker.io/redis:7
+    network_mode: host
+    command: redis-server /usr/local/etc/redis/redis.conf --port 16380
     volumes:
-      - redis-cluster_data-1:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
+      - ./redis-cluster.conf:/usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "testpass", "-p", "16380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis-node-2:
-    depends_on:
-      - app
-    image: docker.io/bitnami/redis-cluster:7.4
+    image: docker.io/redis:7
+    network_mode: host
+    command: redis-server /usr/local/etc/redis/redis.conf --port 16381
     volumes:
-      - redis-cluster_data-2:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
+      - ./redis-cluster.conf:/usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "testpass", "-p", "16381", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  redis-node-3:
+  redis-cluster-init:
+    image: docker.io/redis:7
+    network_mode: host
     depends_on:
-      - app
-    image: docker.io/bitnami/redis-cluster:7.4
-    volumes:
-      - redis-cluster_data-3:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-
-  redis-node-4:
-    depends_on:
-      - app
-    image: docker.io/bitnami/redis-cluster:7.4
-    volumes:
-      - redis-cluster_data-4:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-
-  redis-node-5:
-    image: docker.io/bitnami/redis-cluster:7.4
-    volumes:
-      - redis-cluster_data-5:/bitnami/redis/data
-    depends_on:
-      - app
-      - redis-node-0
-      - redis-node-1
-      - redis-node-2
-      - redis-node-3
-      - redis-node-4
-    environment:
-      - 'REDIS_PASSWORD=bitnami'
-      - 'REDISCLI_AUTH=bitnami'
-      - 'REDIS_CLUSTER_REPLICAS=1'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-      - 'REDIS_CLUSTER_CREATOR=yes'
-
-volumes:
-  redis-cluster_data-0:
-    driver: local
-  redis-cluster_data-1:
-    driver: local
-  redis-cluster_data-2:
-    driver: local
-  redis-cluster_data-3:
-    driver: local
-  redis-cluster_data-4:
-    driver: local
-  redis-cluster_data-5:
-    driver: local
+      redis-node-0:
+        condition: service_healthy
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+    command: >
+      sh -c "redis-cli -a testpass --cluster create
+      127.0.0.1:16379
+      127.0.0.1:16380
+      127.0.0.1:16381
+      --cluster-replicas 0 --cluster-yes"
