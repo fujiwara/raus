@@ -75,7 +75,7 @@ func TestSlogIntegration(t *testing.T) {
 			continue
 		}
 
-		var logEntry map[string]interface{}
+		var logEntry map[string]any
 		if err := json.Unmarshal(line, &logEntry); err != nil {
 			t.Errorf("Failed to parse JSON log: %v", err)
 			continue

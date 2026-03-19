@@ -224,7 +224,7 @@ LOCKING:
 		candidate := make([]uint, 0, MaxCandidate)
 		rangeSize := r.max - r.min + 1
 		startOffset := uint(r.rand.Intn(int(rangeSize)))
-		for j := uint(0); j < rangeSize; j++ {
+		for j := range rangeSize {
 			i := r.min + (startOffset+j)%rangeSize
 			if usedIds[i] {
 				continue
