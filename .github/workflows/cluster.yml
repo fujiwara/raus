@@ -5,13 +5,13 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v4
 
       - name: Start Redis Cluster
         uses: fujiwara/redis-cluster-action@v0
