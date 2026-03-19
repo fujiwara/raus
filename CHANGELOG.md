@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.4.0](https://github.com/fujiwara/raus/compare/v0.3.0...v0.4.0) - 2026-03-19
+- feat: reduce startup latency and SET NX contention by @handlename in https://github.com/fujiwara/raus/pull/12
+- Update README for Discovery phase skip and random candidate offset by @fujiwara in https://github.com/fujiwara/raus/pull/14
+- Migrate Redis Cluster test from bitnami to official redis image by @fujiwara in https://github.com/fujiwara/raus/pull/15
+- Use fujiwara/redis-cluster-action for cluster CI by @fujiwara in https://github.com/fujiwara/raus/pull/16
+
 ## [v0.3.0](https://github.com/fujiwara/raus/compare/v0.2.0...v0.3.0) - 2025-08-02
 - Migrate to log/slog with structured logging by @fujiwara in https://github.com/fujiwara/raus/pull/9
 
