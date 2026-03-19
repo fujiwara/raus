@@ -302,15 +302,14 @@ Without Discovery, the LOCKING phase uses a random offset to spread candidates a
 ## Testing
 
 ```bash
-# Run unit tests
-go test -v
+# Run unit tests (requires redis-server binary in PATH)
+go test -v ./...
 
-# Run integration tests with Redis Cluster
-docker compose up --exit-code-from app
-
-# Or use the cluster CI script
-./cluster-ci.sh
+# Run integration tests with an external Redis Cluster
+REDIS_URL="rediscluster://:password@127.0.0.1:16379" go test -v ./...
 ```
+
+Redis Cluster integration tests run in CI using [fujiwara/redis-cluster-action](https://github.com/fujiwara/redis-cluster-action).
 
 ## Production Considerations
 
