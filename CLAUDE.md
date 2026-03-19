@@ -43,5 +43,5 @@ Tests use `github.com/soh335/go-test-redisserver` to spin up a temporary Redis i
 
 ## CI
 
-- GitHub Actions runs `go test -v ./...` on Go 1.25 and 1.26 with Redis 7.x.
+- GitHub Actions runs `go test -v ./...` with Redis 7.x.
 - A separate `cluster.yml` workflow tests Redis Cluster via Docker Compose.
