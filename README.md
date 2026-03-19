@@ -164,9 +164,9 @@ raus.New(redisURI, 100, 199) // Reserved range for specific service
 
 The machine ID allocation process follows these steps:
 
-1. **Discovery Phase**: Listen to Redis Pub/Sub channel to discover other instances' machine IDs
-2. **Candidate Selection**: Choose from available machine IDs not used by other instances
-3. **Atomic Assignment**: Use Redis `SET NX` to atomically claim a machine ID
+1. **Discovery Phase** (optional): Listen to Redis Pub/Sub channel for `SubscribeTimeout` (default: 3 seconds) to discover other instances' machine IDs. This pre-populates a used-ID map so that the next phase can avoid IDs already in use. Can be skipped by setting `raus.SubscribeTimeout = 0` (see [Skipping the Discovery Phase](#skipping-the-discovery-phase)).
+2. **Candidate Selection**: Select candidate IDs starting from a random offset within the configured range, skipping IDs known to be in use. Each instance starts from a different random point, reducing collision probability when multiple instances start simultaneously.
+3. **Atomic Assignment**: Use Redis `SET NX` to atomically claim a machine ID. If the key already exists (another instance holds it), retry with a new random offset.
 4. **Heartbeat Broadcasting**: Continuously publish assigned machine ID to coordinate with other instances
 5. **Graceful Release**: Release machine ID lock on service shutdown
 
@@ -249,6 +249,22 @@ raus.LockExpires = 60 * time.Second // Longer locks for slow startups
 raus.SubscribeTimeout = 10 * time.Second // Longer discovery phase
 raus.CleanupTimeout = 30 * time.Second   // Cleanup timeout
 ```
+
+### Skipping the Discovery Phase
+
+By default, `Get()` blocks for `SubscribeTimeout` (3 seconds) during the Discovery phase to learn which machine IDs are already in use. You can skip this by setting `SubscribeTimeout` to zero:
+
+```go
+raus.SubscribeTimeout = 0  // skip Discovery, proceed directly to SET NX
+id, ch, err := r.Get(ctx)
+```
+
+Without Discovery, the LOCKING phase uses a random offset to spread candidates across the full ID range, reducing collision probability.
+
+**Trade-offs:**
+- Eliminates the ~3-second startup delay
+- When the ID range has plenty of free slots, collisions are rare and retries are fast (single Redis round trip each)
+- When most IDs in the range are already occupied, more `SET NX` retries may be needed since the instance cannot pre-filter used IDs. In high-occupancy scenarios, keeping Discovery enabled (the default) is recommended.
 
 ## Use Cases
 
