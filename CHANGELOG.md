@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.4.1](https://github.com/fujiwara/raus/compare/v0.4.0...v0.4.1) - 2026-09-19
+- Rename CLAUDE.md to AGENTS.md by @fujiwara in https://github.com/fujiwara/raus/pull/17
+
 ## [v0.4.0](https://github.com/fujiwara/raus/compare/v0.3.0...v0.4.0) - 2026-03-19
 - feat: reduce startup latency and SET NX contention by @handlename in https://github.com/fujiwara/raus/pull/12
 - Update README for Discovery phase skip and random candidate offset by @fujiwara in https://github.com/fujiwara/raus/pull/14
